@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Carpet Clean Game</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#151515;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;touch-action:none}
+#app{height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{padding:10px 14px 8px;display:flex;align-items:center;gap:10px}
+.title{font-weight:800;letter-spacing:.08em;font-size:14px;white-space:nowrap}
+.bar{height:12px;background:#333;border-radius:99px;flex:1;overflow:hidden}
+#fill{height:100%;width:0%;background:linear-gradient(90deg,#eee,#fff);transition:width .15s}
+#pct{font-variant-numeric:tabular-nums;font-weight:800;width:42px;text-align:right}
+#stage{position:relative;flex:1;min-height:0;margin:0 10px 8px;border-radius:18px;overflow:hidden;background:#30271f;box-shadow:inset 0 0 40px #0008}
+canvas{width:100%;height:100%;display:block;touch-action:none}
+#hint{position:absolute;left:50%;top:16px;transform:translateX(-50%);background:#0009;padding:8px 12px;border-radius:99px;font-size:12px;white-space:nowrap;pointer-events:none}
+#done{display:none;position:absolute;inset:0;background:#000a;align-items:center;justify-content:center;flex-direction:column;text-align:center}
+#done b{font-size:34px} #done button{margin-top:16px;border:0;border-radius:14px;padding:13px 22px;font-weight:800;font-size:16px}
+nav{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:0 10px 10px}
+.tool{border:1px solid #444;background:#242424;color:#ddd;border-radius:14px;padding:9px 2px 8px;font-size:11px;font-weight:700}
+.tool span{display:block;font-size:23px;margin-bottom:2px}
+.tool.active{background:#f1f1f1;color:#111;border-color:#fff}
+</style>
+</head>
+<body>
+<div id="app">
+<header><div class="title">CARPET CLEAN</div><div class="bar"><div id="fill"></div></div><div id="pct">0%</div></header>
+<div id="stage">
+<canvas id="game"></canvas>
+<div id="hint">🚿 まず水でカーペットを濡らそう</div>
+<div id="done"><b>✨ CLEAN!</b><div>めっちゃ綺麗になった。</div><button id="again">もう一枚洗う</button></div>
+</div>
+<nav>
+<button class="tool active" data-tool="water"><span>🚿</span>水</button>
+<button class="tool" data-tool="soap"><span>🫧</span>洗剤</button>
+<button class="tool" data-tool="brush"><span>🧹</span>ブラシ</button>
+<button class="tool" data-tool="squeegee"><span>🧽</span>仕上げ</button>
+</nav>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d',{willReadFrequently:true});
+const pct=document.getElementById('pct'),fill=document.getElementById('fill'),hint=document.getElementById('hint'),done=document.getElementById('done');
+let tool='water',painting=false,last=null,progress=0,dpr=1,W=0,H=0;
+let dirt,wet,soap,clean;
+
+function resize(){
+ const r=canvas.getBoundingClientRect(); dpr=Math.min(devicePixelRatio||1,2);
+ W=Math.max(1,Math.floor(r.width*dpr)); H=Math.max(1,Math.floor(r.height*dpr));
+ canvas.width=W;canvas.height=H; reset();
+}
+function makeLayer(){let c=document.createElement('canvas');c.width=W;c.height=H;return c}
+function reset(){
+ dirt=makeLayer();wet=makeLayer();soap=makeLayer();clean=makeLayer();
+ let d=dirt.getContext('2d');
+ d.fillStyle='#9b7452';d.fillRect(0,0,W,H);
+ // carpet weave
+ d.globalAlpha=.22;
+ for(let y=0;y<H;y+=12*dpr){d.fillStyle=y%(24*dpr)<1?'#5f4635':'#c19a76';d.fillRect(0,y,W,3*dpr)}
+ d.globalAlpha=1;
+ // ugly dirt patches
+ for(let i=0;i<90;i++){
+   let x=Math.random()*W,y=Math.random()*H,r=(12+Math.random()*55)*dpr;
+   let g=d.createRadialGradient(x,y,0,x,y,r);
+   g.addColorStop(0,`rgba(${35+Math.random()*35|0},${22+Math.random()*20|0},12,.75)`);
+   g.addColorStop(1,'rgba(30,20,10,0)');
+   d.fillStyle=g;d.beginPath();d.arc(x,y,r,0,Math.PI*2);d.fill();
+ }
+ progress=0;done.style.display='none';updateUI();draw();
+}
+function pos(e){let r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)*dpr,y:(e.clientY-r.top)*dpr}}
+function stroke(a,b){
+ const layers={water:wet,soap:soap,brush:clean,squeegee:clean}; let c=layers[tool].getContext('2d');
+ c.lineCap='round';c.lineJoin='round';c.lineWidth=(tool==='squeegee'?58:tool==='brush'?46:40)*dpr;
+ if(tool==='water'){c.strokeStyle='rgba(80,160,220,.34)'}
+ if(tool==='soap'){c.strokeStyle='rgba(255,255,255,.72)'}
+ if(tool==='brush'){c.strokeStyle='rgba(255,255,255,.42)'}
+ if(tool==='squeegee'){c.strokeStyle='rgba(255,255,255,.78)'}
+ c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke();
+ if(tool==='soap'){
+   c.fillStyle='rgba(255,255,255,.7)';
+   for(let i=0;i<4;i++){let x=b.x+(Math.random()-.5)*35*dpr,y=b.y+(Math.random()-.5)*35*dpr,r=(2+Math.random()*6)*dpr;c.beginPath();c.arc(x,y,r,0,7);c.fill()}
+ }
+ calculate();draw();
+}
+function calculate(){
+ let c=clean.getContext('2d').getImageData(0,0,W,H).data, count=0,total=0,step=Math.max(4,Math.floor(12*dpr));
+ for(let y=0;y<H;y+=step)for(let x=0;x<W;x+=step){total++;if(c[(y*W+x)*4+3]>40)count++}
+ progress=Math.min(100,Math.round(count/total*100));
+ updateUI();
+ if(progress>=94){progress=100;updateUI();done.style.display='flex'}
+}
+function updateUI(){
+ pct.textContent=progress+'%';fill.style.width=progress+'%';
+ hint.textContent=tool==='water'?'🚿 指でなぞって水をかける':tool==='soap'?'🫧 泡だらけにしよう':tool==='brush'?'🧹 ゴシゴシ汚れを浮かせる':'🧽 汚水ごと一気に仕上げる';
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.drawImage(dirt,0,0);
+ // wet darkening
+ ctx.save();ctx.globalCompositeOperation='multiply';ctx.drawImage(wet,0,0);ctx.restore();
+ // cleaned carpet: use clean mask to reveal a fresh base
+ let fresh=makeLayer(),f=fresh.getContext('2d');f.fillStyle='#c7a47d';f.fillRect(0,0,W,H);
+ f.globalCompositeOperation='destination-in';f.drawImage(clean,0,0);
+ ctx.drawImage(fresh,0,0);
+ // foam last
+ ctx.drawImage(soap,0,0);
+}
+canvas.addEventListener('pointerdown',e=>{painting=true;last=pos(e);canvas.setPointerCapture?.(e.pointerId);e.preventDefault()});
+canvas.addEventListener('pointermove',e=>{if(!painting)return;let p=pos(e);stroke(last,p);last=p;e.preventDefault()});
+canvas.addEventListener('pointerup',()=>{painting=false;last=null});
+canvas.addEventListener('pointercancel',()=>{painting=false;last=null});
+document.querySelectorAll('.tool').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));b.classList.add('active');tool=b.dataset.tool;updateUI()}));
+document.getElementById('again').addEventListener('click',reset);
+window.addEventListener('resize',resize);
+requestAnimationFrame(resize);
+})();
+</script>
+</body>
+</html>
